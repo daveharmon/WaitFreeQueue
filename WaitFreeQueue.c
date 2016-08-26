@@ -149,9 +149,60 @@ int help_enq(WFQueue_t* q, int tid, long phase)
 	return 0;
 }
 
-int help_deq(WFQueue_t* q, int tid, long phase)
+void help_finish_deq(WFQueue_t* q)
 {
-	return 0;
+	queue_node_t* first = (queue_node_t*)atomic_load(&q->head);
+	queue_node_t* next = (queue_node_t*)atomic_load(&first->next);
+	int tid = atomic_load(&first.deqTid);	// read deqTid of the first element
+	if (-1 != tid)
+	{
+		
+	}
+}
+
+void help_deq(WFQueue_t* q, int tid, long phase)
+{
+	while (is_still_pending(q, tid, phase))
+	{
+		queue_node_t* first = (queue_node_t*)atomic_load(&q->head);
+		queue_node_t* last = (queue_node_t*)atomic_load(&q->tail);
+		queue_node_t* next = (queue_node_t*)atomic_load(&first->next);
+		if (first == atomic_load(q->head))
+		{
+			if (first == last) 	// queue might be empty
+			{
+				if (NULL == next)	// queue is empty
+				{
+					queue_op_desc_t* curDesc = q->state[tid];
+					if ((last == atomic_load(q->tail)) && (is_still_pending(q, tid, phase)))
+					{
+						queue_op_desc_t* newDesc = queue_op_desc_init(((queue_op_desc_t*)atomic_load(q->state[tid]))->phase, false, false, NULL);
+						atomic_compare_exchange_strong(q->state[tid], curDesc, newDesc);
+					}
+				}
+				else	// some enqueue is in progress 
+				{
+					help_finish_enq();	// help it first, then retry
+				}
+			}	
+			else	// queue is not empty
+			{
+				queue_op_desc_t* curDesc = atomic_load(q->state[tid]);
+				queue_node_t* node = curDesc->node;
+				if (!is_still_pending(q, tid, phase)) break;
+				if ((first == atomic_load(q->head)) && node != first)
+				{
+					queue_op_desc_t* newDesc = queue_op_desc_init(((queue_op_desc_t*)atomic_load(q->state[tid]))->phase, true, false, first);
+					if (!atomic_compare_exchange_strong(atomic_load(q->state[tid]), curDesc, newDesc))
+					{
+						continue;
+					}
+				}
+				atomic_compare_exchange_strong(first->deqTid, -1, tid);
+				help_finish_deq();
+			}
+		}
+	}
 }
 
 void help(WFQueue_t* q, long phase)
@@ -195,22 +246,12 @@ void wf_enqueue(WFQueue_t* q, int tid, int value)
 	help_finish_enq(q);
 }
 
-void help_deq()
-{
-
-}
-
-void help_finish_deq()
-{
-	
-}
-
 int wf_dequeue(WFQueue_t* q, int tid)
 {
 	long phase = max_phase(q) + 1;
 	q->state[tid] = queue_node_init(phase, true, false, null);
 	help(q, phase);
-	help_finish_deq();
+	help_finish_deq(q);
 	queue_node_t* node = q->state[tid]->node;
 	if (NULL == node)
 	{
