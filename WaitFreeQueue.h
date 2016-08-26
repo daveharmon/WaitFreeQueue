@@ -23,21 +23,34 @@
 typedef struct WFQueue WFQueue;
 
 /*
+ *	Allocate a WFQueue, given a number of threads
  *
+ *	TODO: implement a dynamically growable thread pool
  */
 WFQueue* wait_free_queue_init(int num_threads);
 
 /*
- *
+ *	Free the QFQueue, this should be done once each thread
+ * 	has been joined to the creating thread, there aren't any
+ *	checks to make sure that this happens.
  */
 void wait_free_queue_destroy(WFQueue* q);
 
 /*
+ *	Enqueue some integer value from a given thread id.  This is not the 
+ *	kernel tid, but rather an incremental value starting
+ *	from 0 representing one of the threads in the thread pool
  *
+ *	Right now, value must be an integer.  Eventually I may convert 
+ *	this to a void* if I ever reach a successful point, but for testing
+ *	this is very convenient
  */
 void wf_enqueue(WFQueue* q, int tid, int value);
 
 /*
- *
+ *	Dequeue from some thread id.  This is not the kernel tid,
+ *	but rather an incremental value starting from 0 representing one
+ *	of the threads in the thread pool.  Returns the integer value
+ * 	being stored by the first element in the queue.
  */
 int wf_dequeue(WFQueue* q, int tid);
