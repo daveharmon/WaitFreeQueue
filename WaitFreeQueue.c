@@ -1,6 +1,10 @@
 /*
- *
+ *	C implementation of a wait free queue based on 
+ *	http://www.cs.technion.ac.il/~erez/Papers/wfquque-ppopp.pdf
+ *	
  */
+
+#include "WaitFreeQueue.h"
 
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -63,7 +67,7 @@ void queue_op_desc_destroy(queue_op_desc_t* op)
 	free(op);
 }
 
-WFQueue_t* wait_free_queue_init(int num_threads)
+WFQueue* wait_free_queue_init(int num_threads)
 {
 	WFQueue_t* q = malloc(sizeof(WFQueue_t));
 	q->sentinel = queue_node_init(-1, -1);
@@ -79,11 +83,12 @@ WFQueue_t* wait_free_queue_init(int num_threads)
 		atomic_init(ptr, (intptr_t)queue_op_desc_init(-1, 0, 1, NULL));
 		q->state[i] = ptr;
 	}
-	return q;
+	return (WFQueue*)q;
 }
 
-void wait_free_queue_destroy(WFQueue_t* q)
+void wait_free_queue_destroy(WFQueue* wf_q)
 {
+	WFQueue_t* q = (WFQueue_t*)wf_q;
 	for (int i = 0; i < q->space; i++) {
 		if (((queue_op_desc_t*)atomic_load(
 			(atomic_intptr_t*)q->state[i]))->node) {
@@ -242,8 +247,9 @@ long max_phase(WFQueue_t* q)
 	return max_phase;
 }
 
-void wf_enqueue(WFQueue_t* q, int tid, int value)
+void wf_enqueue(WFQueue* wf_q, int tid, int value)
 {
+	WFQueue_t* q = (WFQueue_t*)wf_q;
 	long phase = max_phase(q) + 1;
 	queue_op_desc_t* op = (queue_op_desc_t*)atomic_load(
 		(atomic_intptr_t*)q->state[tid]);
@@ -255,8 +261,9 @@ void wf_enqueue(WFQueue_t* q, int tid, int value)
 	help_finish_enq(q);
 }
 
-int wf_dequeue(WFQueue_t* q, int tid)
+int wf_dequeue(WFQueue* wf_q, int tid)
 {
+	WFQueue_t* q = (WFQueue_t*)wf_q;
 	long phase = max_phase(q) + 1;
 	q->state[tid] = queue_node_init(phase, true, false, null);
 	help(q, phase);
