@@ -156,7 +156,14 @@ void help_finish_deq(WFQueue_t* q)
 	int tid = atomic_load(&first.deqTid);	// read deqTid of the first element
 	if (-1 != tid)
 	{
-		
+		queue_op_desc_t* curDesc = (queue_op_desc_t*)atomic_load(q->state[tid]);
+		if ((first == (queue_node_t*)atomic_load(&q->head)) && (NULL != next)) 
+		{
+			queue_op_desc_t* newDesc = queue_op_desc_init(((queue_op_desc_t*)atomic_load(
+				q->state[tid]))->phase, false, false, ((queue_op_desc_t*)atomic_load(q->state[tid]))->node);
+			atomic_compare_exchange_strong((queue_op_desc_t*)atomic_load(q->state[tid]), curDesc, newDesc);
+			atomic_compare_exchange_strong(q->head, first, next);
+		}
 	}
 }
 
@@ -173,10 +180,11 @@ void help_deq(WFQueue_t* q, int tid, long phase)
 			{
 				if (NULL == next)	// queue is empty
 				{
-					queue_op_desc_t* curDesc = q->state[tid];
+					queue_op_desc_t* curDesc = (queue_op_desc_t*)atomic_load(q->state[tid]);
 					if ((last == atomic_load(q->tail)) && (is_still_pending(q, tid, phase)))
 					{
-						queue_op_desc_t* newDesc = queue_op_desc_init(((queue_op_desc_t*)atomic_load(q->state[tid]))->phase, false, false, NULL);
+						queue_op_desc_t* newDesc = queue_op_desc_init(
+							((queue_op_desc_t*)atomic_load(q->state[tid]))->phase, false, false, NULL);
 						atomic_compare_exchange_strong(q->state[tid], curDesc, newDesc);
 					}
 				}
@@ -192,7 +200,8 @@ void help_deq(WFQueue_t* q, int tid, long phase)
 				if (!is_still_pending(q, tid, phase)) break;
 				if ((first == atomic_load(q->head)) && node != first)
 				{
-					queue_op_desc_t* newDesc = queue_op_desc_init(((queue_op_desc_t*)atomic_load(q->state[tid]))->phase, true, false, first);
+					queue_op_desc_t* newDesc = queue_op_desc_init(
+						((queue_op_desc_t*)atomic_load(q->state[tid]))->phase, true, false, first);
 					if (!atomic_compare_exchange_strong(atomic_load(q->state[tid]), curDesc, newDesc))
 					{
 						continue;
