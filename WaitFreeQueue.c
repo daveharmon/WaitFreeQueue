@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+/*** ------------ Private Structures ------------ ***/
+
 typedef struct 
 {
 	int value;
@@ -35,6 +37,8 @@ typedef struct
 	atomic_int length;
 	int space;
 } WFQueue_t;
+
+/*** ------------ Private Functions ------------ ***/
 
 
 queue_node_t* queue_node_init(int val, int etid)
@@ -131,17 +135,12 @@ int help_enq(WFQueue_t* q, int tid, long phase)
 	while (is_still_pending(q, tid, phase)) {
 		queue_node_t* last = (queue_node_t*)atomic_load(&q->tail);
 		queue_node_t* next = (queue_node_t*)atomic_load(&last->next);
-		printf("0\n");
 		if (last == ((queue_node_t*)atomic_load(&q->tail))) {
-			printf("1\n");
 			if (NULL == next) {	// enqueue can be applied
-				printf("2\n");
 				if (is_still_pending(q, tid, phase)) {
-					printf("3\n");
 					if (atomic_compare_exchange_strong(&last->next, 
 							(intptr_t*)&next, 
 							(intptr_t)((queue_op_desc_t*)atomic_load((atomic_intptr_t*)q->state[tid]))->node)) {
-						printf("4\n");
 					help_finish_enq(q);
 						return 0;
 					}
@@ -245,6 +244,43 @@ long max_phase(WFQueue_t* q)
 		}
 	}
 	return max_phase;
+}
+
+/*** ------------ Public Functions ------------ ***/
+
+WFQueue* wait_free_queue_init(int num_threads)
+{
+	WFQueue_t* q = malloc(sizeof(WFQueue_t));
+	q->sentinel = queue_node_init(-1, -1);
+	atomic_init(&q->head, (long)q->sentinel);
+	atomic_init(&q->tail, (long)q->sentinel);
+	atomic_init(&q->length, 0); 
+	q->space = num_threads;
+
+	q->state = malloc(sizeof(void*) * num_threads);
+	for (int i = 0; i < num_threads; i++)
+	{
+		atomic_intptr_t* ptr = malloc(sizeof(atomic_intptr_t));
+		atomic_init(ptr, (intptr_t)queue_op_desc_init(-1, 0, 1, NULL));
+		q->state[i] = ptr;
+	}
+	return (WFQueue*)q;
+}
+
+void wait_free_queue_destroy(WFQueue* wf_q)
+{
+	WFQueue_t* q = (WFQueue_t*)wf_q;
+	for (int i = 0; i < q->space; i++) {
+		if (((queue_op_desc_t*)atomic_load(
+			(atomic_intptr_t*)q->state[i]))->node) {
+			queue_node_destroy(((queue_op_desc_t*)atomic_load(
+			(atomic_intptr_t*)q->state[i]))->node);
+		}
+		queue_op_desc_destroy((queue_op_desc_t*)atomic_load(
+			(atomic_intptr_t*)q->state[i]));
+	}
+	free(q->state);
+	free(q);
 }
 
 void wf_enqueue(WFQueue* wf_q, int tid, int value)
