@@ -8,7 +8,6 @@ A wait free data structure is a concurrent structure that guarantees each thread
 This is a stronger guarentee than a lock free data structure that guarantees each thread will complete its task.  Lock free structures don't take advantage of strong concurrency since only one thread does not starve.  
 
 ### TODOS
-	- Current status is 20 compile errors, fix each of these
 	- Test file currently does not work, segfaults with multiple threads
 	- Once test file is working, verify our implementation
 	- Add memory management, there is currently a lot of leakage
