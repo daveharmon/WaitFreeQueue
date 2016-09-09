@@ -71,41 +71,6 @@ void queue_op_desc_destroy(queue_op_desc_t* op)
 	free(op);
 }
 
-WFQueue* wait_free_queue_init(int num_threads)
-{
-	WFQueue_t* q = malloc(sizeof(WFQueue_t));
-	q->sentinel = queue_node_init(-1, -1);
-	atomic_init(&q->head, (long)q->sentinel);
-	atomic_init(&q->tail, (long)q->sentinel);
-	atomic_init(&q->length, 0); 
-	q->space = num_threads;
-
-	q->state = malloc(sizeof(void*) * num_threads);
-	for (int i = 0; i < num_threads; i++)
-	{
-		atomic_intptr_t* ptr = malloc(sizeof(atomic_intptr_t));
-		atomic_init(ptr, (intptr_t)queue_op_desc_init(-1, 0, 1, NULL));
-		q->state[i] = ptr;
-	}
-	return (WFQueue*)q;
-}
-
-void wait_free_queue_destroy(WFQueue* wf_q)
-{
-	WFQueue_t* q = (WFQueue_t*)wf_q;
-	for (int i = 0; i < q->space; i++) {
-		if (((queue_op_desc_t*)atomic_load(
-			(atomic_intptr_t*)q->state[i]))->node) {
-			queue_node_destroy(((queue_op_desc_t*)atomic_load(
-			(atomic_intptr_t*)q->state[i]))->node);
-		}
-		queue_op_desc_destroy((queue_op_desc_t*)atomic_load(
-			(atomic_intptr_t*)q->state[i]));
-	}
-	free(q->state);
-	free(q);
-}
-
 int is_still_pending(WFQueue_t* q, int tid, long ph) 
 {
 	queue_op_desc_t* p = (queue_op_desc_t*)atomic_load(
@@ -164,9 +129,11 @@ void help_finish_deq(WFQueue_t* q)
 		if ((first == (queue_node_t*)atomic_load(&q->head)) && (NULL != next)) 
 		{
 			queue_op_desc_t* newDesc = queue_op_desc_init(((queue_op_desc_t*)atomic_load(
-				(atomic_intptr_t*)q->state[tid]))->phase, 0, 0, ((queue_op_desc_t*)atomic_load(q->state[tid]))->node);
-			atomic_compare_exchange_strong((atomic_intptr_t*)q->state[tid], curDesc, newDesc);
-			atomic_compare_exchange_strong(q->head, first, next);
+				(atomic_intptr_t*)q->state[tid]))->phase, 0, 0, 
+			((queue_op_desc_t*)atomic_load((atomic_intptr_t*)q->state[tid]))->node);
+			atomic_compare_exchange_strong((atomic_intptr_t*)q->state[tid], 
+				(intptr_t *)&curDesc, (intptr_t)newDesc);
+			atomic_compare_exchange_strong(&q->head, (intptr_t *)&first, (intptr_t)next);
 		}
 	}
 }
@@ -178,41 +145,42 @@ void help_deq(WFQueue_t* q, int tid, long phase)
 		queue_node_t* first = (queue_node_t*)atomic_load(&q->head);
 		queue_node_t* last = (queue_node_t*)atomic_load(&q->tail);
 		queue_node_t* next = (queue_node_t*)atomic_load(&first->next);
-		if (first == atomic_load(q->head))
+		if (first == (queue_node_t*)atomic_load(&q->head))
 		{
 			if (first == last) 	// queue might be empty
 			{
 				if (NULL == next)	// queue is empty
 				{
 					queue_op_desc_t* curDesc = (queue_op_desc_t*)atomic_load((atomic_intptr_t*)q->state[tid]);
-					if ((last == atomic_load(q->tail)) && (is_still_pending(q, tid, phase)))
+					if ((last == (queue_node_t*)atomic_load(&q->tail)) && (is_still_pending(q, tid, phase)))
 					{
 						queue_op_desc_t* newDesc = queue_op_desc_init(
 							((queue_op_desc_t*)atomic_load((atomic_intptr_t*)q->state[tid]))->phase, 0, 0, NULL);
-						atomic_compare_exchange_strong((atomic_intptr_t*)q->state[tid], curDesc, newDesc);
+						atomic_compare_exchange_strong((atomic_intptr_t*)q->state[tid], (intptr_t *)&curDesc, (intptr_t)newDesc);
 					}
 				}
 				else	// some enqueue is in progress 
 				{
-					help_finish_enq();	// help it first, then retry
+					help_finish_enq(q);	// help it first, then retry
 				}
 			}	
 			else	// queue is not empty
 			{
-				queue_op_desc_t* curDesc = atomic_load((atomic_intptr_t*)q->state[tid]);
+				queue_op_desc_t* curDesc = (queue_op_desc_t*)atomic_load((atomic_intptr_t*)q->state[tid]);
 				queue_node_t* node = curDesc->node;
 				if (!is_still_pending(q, tid, phase)) break;
-				if ((first == atomic_load(q->head)) && node != first)
+				if (((intptr_t)first == atomic_load(&q->head)) && node != first)
 				{
 					queue_op_desc_t* newDesc = queue_op_desc_init(
 						((queue_op_desc_t*)atomic_load((atomic_intptr_t*)q->state[tid]))->phase, 1, 0, first);
-					if (!atomic_compare_exchange_strong(atomic_load((atomic_intptr_t*)q->state[tid]), curDesc, newDesc))
+					if (!atomic_compare_exchange_strong((atomic_intptr_t*)q->state[tid], (intptr_t *)&curDesc, (intptr_t)newDesc))
 					{
 						continue;
 					}
 				}
-				atomic_compare_exchange_strong(first->deqTid, -1, tid);
-				help_finish_deq();
+				int new_value = -1;
+				atomic_compare_exchange_strong(&first->deqTid, &new_value, tid);
+				help_finish_deq(q);
 			}
 		}
 	}
@@ -301,16 +269,17 @@ int wf_dequeue(WFQueue* wf_q, int tid)
 {
 	WFQueue_t* q = (WFQueue_t*)wf_q;
 	long phase = max_phase(q) + 1;
-	q->state[tid] = queue_node_init(phase, 1, 0, null);
+	q->state[tid] = queue_op_desc_init(phase, 1, 0, NULL);
 	help(q, phase);
 	help_finish_deq(q);
-	queue_node_t* node = q->state[tid]->node;
+	queue_node_t* node = ((queue_op_desc_t*)atomic_load(
+		((atomic_intptr_t*)q->state[tid])))->node;
 	if (NULL == node)
 	{
 		printf("EMPTY EXCEPTION\n");
-		return;
+		return -1;
 	}
-	return atomic_load(node->next)->value;
+	return ((queue_node_t*)atomic_load(&node->next))->value;
 }
 
 
