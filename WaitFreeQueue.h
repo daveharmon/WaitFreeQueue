@@ -34,7 +34,12 @@ WFQueue* wait_free_queue_init(int num_threads);
  * 	has been joined to the creating thread, there aren't any
  *	checks to make sure that this happens.
  */
-void wait_free_queue_destroy(WFQueue* q);
+void wait_free_queue_destroy(WFQueue* wf_q);
+
+/*
+ *
+ */
+int is_still_pending_test(WFQueue* q, int tid, long ph);
 
 /*
  *	Enqueue some integer value from a given thread id.  This is not the 
@@ -45,7 +50,7 @@ void wait_free_queue_destroy(WFQueue* q);
  *	this to a void* if I ever reach a successful point, but for testing
  *	this is very convenient
  */
-void wf_enqueue(WFQueue* q, int tid, int value);
+void wf_enqueue(WFQueue* wf_q, int tid, int value);
 
 /*
  *	Dequeue from some thread id.  This is not the kernel tid,
@@ -53,4 +58,4 @@ void wf_enqueue(WFQueue* q, int tid, int value);
  *	of the threads in the thread pool.  Returns the integer value
  * 	being stored by the first element in the queue.
  */
-int wf_dequeue(WFQueue* q, int tid);
+int wf_dequeue(WFQueue* wf_q, int tid);

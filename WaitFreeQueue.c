@@ -251,6 +251,14 @@ void wait_free_queue_destroy(WFQueue* wf_q)
 	free(q);
 }
 
+int is_still_pending_test(WFQueue* wf_q, int tid, long ph) 
+{
+	WFQueue_t* q = (WFQueue_t*)wf_q;
+	queue_op_desc_t* p = (queue_op_desc_t*)atomic_load(
+		(atomic_intptr_t*)q->state[tid]);
+	return (p->pending && p->phase) <= ph;
+}
+
 void wf_enqueue(WFQueue* wf_q, int tid, int value)
 {
 	WFQueue_t* q = (WFQueue_t*)wf_q;

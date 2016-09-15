@@ -18,7 +18,7 @@ struct pthread_ret
 	char* status;
 };
 
-WFQueue_t* q;
+WFQueue* q;
 
 void* wf_queue_test(void* args) 
 {
@@ -28,7 +28,7 @@ void* wf_queue_test(void* args)
 	queue_op_desc_t* op = (queue_op_desc_t*)atomic_load(
 		(atomic_intptr_t*)q->state[tid]);
 	printf("%i loaded: %lu with phase: %ld\n", tid, (long)op, op->phase);
-	printf("is_still_pending: %i\n", is_still_pending(q, tid, -1));
+	printf("is_still_pending: %i\n", is_still_pending_test(q, tid, -1));
 
 	struct pthread_ret* ret = malloc(sizeof(struct pthread_ret));
 	ret->tid = tid;
@@ -39,7 +39,7 @@ void* wf_queue_test(void* args)
 	op = (queue_op_desc_t*)atomic_load(
 		(atomic_intptr_t*)q->state[tid]);
 	printf("%i loaded: %lu with phase: %ld\n", tid, (long)op, op->phase);
-	printf("is_still_pending: %i\n", is_still_pending(q, tid, 0));
+	printf("is_still_pending: %i\n", is_still_pending_test(q, tid, 0));
 
 	return NULL;
 }
